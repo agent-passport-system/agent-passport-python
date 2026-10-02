@@ -102,7 +102,7 @@ assert canonical_json(data) == '{"a":2,"nested":{"a":1,"b":3},"z":1}'
 
 ## Verification boundary
 
-[The verification boundary](https://github.com/aeoess/agent-passport-python/blob/main/docs/verification-boundary.md) names the verification APIs that establish authority from caller-supplied trust, and the trust input each one takes.
+[The verification boundary](https://github.com/agent-passport-system/agent-passport-python/blob/main/docs/verification-boundary.md) names the verification APIs that establish authority from caller-supplied trust, and the trust input each one takes.
 
 ## Protocol Layers
 
