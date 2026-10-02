@@ -1,5 +1,12 @@
 # Changelog
 
+## 4.2.1 (2026-10-02)
+
+First release from the agent-passport-system organization. No library code changes from 4.2.0.
+
+- Package metadata points at the repository's new home, `agent-passport-system/agent-passport-python`.
+- The publish workflow runs from the organization repository through PyPI trusted publishing, with release guards and tests that require each guard to run and to stop the job when it fails.
+
 ## 4.2.0 (2026-09-24)
 
 One conformance fix and seven opt-in experimental modules for the authority lifecycle,
