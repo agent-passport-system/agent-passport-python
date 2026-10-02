@@ -39,7 +39,7 @@ test = [
 
 [project.urls]
 Homepage = "https://aeoess.com"
-Repository = "https://github.com/aeoess/agent-passport-python"
+Repository = "https://github.com/agent-passport-system/agent-passport-python"
 Documentation = "https://agent-passport.org/llms-full.txt"
 "npm SDK" = "https://www.npmjs.com/package/agent-passport-system"
 
