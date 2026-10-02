@@ -78,6 +78,9 @@ class Job:
     text: str
     steps: list[Step] = field(default_factory=list)
     needs: tuple[str, ...] = ()
+    # The job's own ``continue-on-error``, as written, or None. At job level it
+    # makes every step's failure non-fatal, a gate's included.
+    continue_on_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,13 @@ def _steps_of(doc: _Document, job_start: int, job_end: int, job_indent: int) -> 
     return steps
 
 
+def _job_field(doc: _Document, job_start: int, job_indent: int, key: str) -> str | None:
+    for _, name, value in doc.child_keys(job_start, job_indent):
+        if name == key:
+            return value
+    return None
+
+
 def _needs_of(doc: _Document, job_start: int, job_end: int, job_indent: int) -> tuple[str, ...]:
     for i in range(job_start + 1, job_end):
         if not doc.structural(i):
@@ -256,6 +266,7 @@ def parse_workflow(text: str, path: str = "<workflow>") -> Workflow:
                 text="\n".join(doc.lines[line:stop]),
                 steps=_steps_of(doc, line, stop, job_indent or 0),
                 needs=_needs_of(doc, line, stop, job_indent or 0),
+                continue_on_error=_job_field(doc, line, job_indent or 0, "continue-on-error"),
             )
         )
 
@@ -273,6 +284,91 @@ def effective_text(step_text: str) -> str:
 
 def step_matches(step_text: str, pattern: re.Pattern[str]) -> bool:
     return bool(pattern.search(effective_text(step_text)))
+
+
+# --- a step's own keys ------------------------------------------------------
+#
+# Matching a pattern against a step's raw text answers "is this filename
+# mentioned here". It does not answer "does this step run that file, and does its
+# failure stop the job", and the two came apart: a guard step with ``if: false``,
+# with ``continue-on-error: true``, with its command replaced by ``echo``, or
+# with ``|| true`` appended still mentions the filename, and the placement rule
+# passed all four. So a step's mapping is read one level deep. One level only.
+# Nothing below a step's own keys is interpreted, and this is not a shell parser.
+
+
+def _step_lines(step_text: str) -> list[str]:
+    """The step's lines with the leading ``- `` turned into indentation.
+
+    So the step's first key sits at the same column as the rest, and a ``run: |``
+    body on the first line does not mask the keys that follow it.
+    """
+    lines = step_text.split("\n")
+    if lines:
+        lines[0] = re.sub(r"^(\s*)-(\s)", r"\1 \2", lines[0])
+    return lines
+
+
+def _block_body(doc: _Document, start: int, indent: int) -> str:
+    """The deeper-indented lines following ``start``, dedented, comments dropped."""
+    body: list[str] = []
+    for i in range(start + 1, len(doc.lines)):
+        line = doc.lines[i]
+        if doc.structural(i) and indent_of(line) <= indent:
+            break
+        if is_comment(line):
+            continue
+        body.append(line)
+    while body and is_blank(body[-1]):
+        body.pop()
+    indents = [indent_of(line) for line in body if not is_blank(line)]
+    strip = min(indents) if indents else 0
+    return "\n".join(line[strip:] for line in body)
+
+
+def step_fields(step_text: str) -> dict[str, tuple[str, str]]:
+    """A step's own keys, mapped to ``(inline value, block body)``."""
+    doc = _Document("\n".join(_step_lines(step_text)))
+    key_indent = indent_of(doc.lines[0]) if doc.lines else 0
+
+    fields: dict[str, tuple[str, str]] = {}
+    for i, line in enumerate(doc.lines):
+        if not doc.structural(i) or indent_of(line) != key_indent:
+            continue
+        match = _PLAIN_KEY.match(line.strip())
+        if match is None or match.group(1) in fields:
+            continue
+        fields[match.group(1)] = (match.group(2).strip(), _block_body(doc, i, key_indent))
+    return fields
+
+
+def run_command_of(step_text: str) -> str | None:
+    """What a step's ``run`` executes: the inline value, or the block scalar body.
+
+    None when the step has no ``run`` at all, which for a gate step is its own
+    answer.
+    """
+    run = step_fields(step_text).get("run")
+    if run is None:
+        return None
+    inline, body = run
+    if inline and inline[0] not in "|>":
+        return inline
+    return body
+
+
+def commands_in(run_body: str) -> list[str]:
+    """The commands a ``run`` body contains, one per line, comments dropped.
+
+    Line granularity is deliberate: enough to tell one canonical invocation from
+    an ``echo`` of it or from a second command next to it, and a gate step is
+    required to be exactly one line, so nothing finer is needed.
+    """
+    return [
+        line.strip()
+        for line in run_body.split("\n")
+        if line.strip() and not line.strip().startswith("#")
+    ]
 
 
 def read_workflows(directory: Path) -> list[Workflow]:
