@@ -327,7 +327,10 @@ def create_action_receipt(
 
     receipt = {
         "receiptId": f"rcpt_{uuid.uuid4()}",
-        "version": "1.0.0",
+        # "1.1" is the version the TypeScript SDK writes and the only one its
+        # verifyReceipt accepts. Receipts already signed with "1.0.0" are not
+        # touched, and verify_action_receipt still checks only their signature.
+        "version": "1.1",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "agentId": agent_id,
         "delegationId": delegation["delegationId"],
