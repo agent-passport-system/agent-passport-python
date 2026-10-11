@@ -126,13 +126,23 @@ def verify_delegation(delegation: dict) -> dict:
     # This was hardcoded False, so the verifier (the enforcement point) never checked depth and a
     # hand-crafted delegation with currentDepth > maxDepth verified as valid. sub_delegate guards
     # depth at creation, but the verifier must check it independently.
+    #
+    # A signed record with no maxDepth member has no depth ceiling on verification
+    # (docs/SPEC-v1.1.md section 4.1: "max_depth defaults to unlimited if absent ... v1.1
+    # verifiers enforce depth limits when the field is present"). This used to read an absent
+    # maxDepth as 0, which rejected every such record at currentDepth 1 or more and matched no
+    # sentence in the spec and not the TypeScript verifier. Absence does not show that a record
+    # predates v1.1. A present maxDepth keeps the comparison below, and a present value that is
+    # not a number is handled exactly as before.
     current_depth = delegation.get("currentDepth", 0)
-    max_depth = delegation.get("maxDepth", 0)
-    depth_exceeded = (
-        isinstance(current_depth, (int, float)) and not isinstance(current_depth, bool)
-        and isinstance(max_depth, (int, float)) and not isinstance(max_depth, bool)
-        and current_depth > max_depth
-    )
+    depth_exceeded = False
+    if "maxDepth" in delegation:
+        max_depth = delegation["maxDepth"]
+        depth_exceeded = (
+            isinstance(current_depth, (int, float)) and not isinstance(current_depth, bool)
+            and isinstance(max_depth, (int, float)) and not isinstance(max_depth, bool)
+            and current_depth > max_depth
+        )
     if depth_exceeded:
         errors.append(f"Depth exceeded: currentDepth {current_depth} > maxDepth {max_depth}")
 
