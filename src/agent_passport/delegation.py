@@ -16,6 +16,22 @@ from .canonical import canonicalize, has_non_finite, canonicalize_for_write
 from ._time import parse_iso_utc
 
 
+def _is_depth(v) -> bool:
+    """A depth value both SDKs read the same way: a non-negative integer up to 2**53 - 1.
+
+    Integer-valued floats count, since 2 and 2.0 canonicalize to the same signed bytes and the
+    TypeScript SDK sees both as the number 2. Booleans, fractions, negatives, non-finite values,
+    strings and integers beyond 2**53 - 1 (not exactly representable in the TypeScript SDK) do not.
+    """
+    if isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return 0 <= v <= 2**53 - 1
+    if isinstance(v, float):
+        return math.isfinite(v) and v.is_integer() and 0 <= v <= 2**53 - 1
+    return False
+
+
 def create_delegation(
     delegated_by: str,
     delegated_to: str,
@@ -49,6 +65,13 @@ def create_delegation(
     Returns:
         Signed Delegation dict.
     """
+    # Refuse to sign a depth verify_delegation would report malformed (#223). Without this the
+    # SDK could return a signed record, such as max_depth=-1, that its own verifier refuses.
+    # None is left as it was: it signs to the same bytes as no maxDepth member, which the
+    # verifier accepts with no ceiling.
+    if max_depth is not None and not _is_depth(max_depth):
+        raise ValueError("max_depth must be a non-negative integer no greater than 2**53 - 1")
+
     now = datetime.now(timezone.utc)
     expiry = now + timedelta(days=expires_in_days)
 
@@ -135,17 +158,21 @@ def verify_delegation(delegation: dict) -> dict:
     # sentence in the spec and not the TypeScript verifier. Absence does not show that a record
     # predates v1.1. The canonical form drops None members, so "maxDepth": None signs to the
     # same bytes as an absent member, and both get this reading. A present numeric maxDepth
-    # keeps the comparison below, and a present value that is not a number is not compared,
-    # as before.
-    current_depth = delegation.get("currentDepth", 0)
-    depth_exceeded = False
-    if "maxDepth" in delegation:
-        max_depth = delegation["maxDepth"]
-        depth_exceeded = (
-            isinstance(current_depth, (int, float)) and not isinstance(current_depth, bool)
-            and isinstance(max_depth, (int, float)) and not isinstance(max_depth, bool)
-            and current_depth > max_depth
-        )
+    # keeps the comparison below.
+    #
+    # A present maxDepth that is not a non-negative integer (a string such as "1", a boolean,
+    # a fraction, a negative) makes the record invalid. It used to be skipped, so the record
+    # verified at any depth, while the TypeScript verifier coerced "1" to 1 and rejected the same
+    # record (#223). No depth result is reported for it: depthExceeded stays False because the
+    # comparison was never made. A present currentDepth gets the same rule, for the same reason.
+    # An absent or None currentDepth is not compared, matching the TypeScript verifier.
+    current_depth = delegation.get("currentDepth")
+    max_depth = delegation.get("maxDepth")
+    if max_depth is not None and not _is_depth(max_depth):
+        errors.append(f"Malformed maxDepth: {max_depth!r} is not a non-negative integer")
+    if current_depth is not None and not _is_depth(current_depth):
+        errors.append(f"Malformed currentDepth: {current_depth!r} is not a non-negative integer")
+    depth_exceeded = _is_depth(max_depth) and _is_depth(current_depth) and current_depth > max_depth
     if depth_exceeded:
         errors.append(f"Depth exceeded: currentDepth {current_depth} > maxDepth {max_depth}")
 
@@ -197,18 +224,7 @@ def sub_delegate(
     # permission to mint new authority under it. With no ceiling on the parent there is no
     # value the child could inherit that the parent's issuer signed, so the child is refused.
     # This used to raise KeyError on an absent maxDepth and TypeError on a non-numeric one.
-    # Integer-valued, matching the TypeScript subDelegate: 2 and 2.0 canonicalize to the same
-    # signed bytes, so both are accepted. Booleans, fractions, negatives, non-finite values and
-    # integers beyond 2**53 - 1 (not exactly representable in the TypeScript SDK) are refused.
-    def _is_depth(v) -> bool:
-        if isinstance(v, bool):
-            return False
-        if isinstance(v, int):
-            return 0 <= v <= 2**53 - 1
-        if isinstance(v, float):
-            return math.isfinite(v) and v.is_integer() and 0 <= v <= 2**53 - 1
-        return False
-
+    # The depth rule is _is_depth above, shared with verify_delegation.
     if not _is_depth(parent.get("maxDepth")):
         raise ValueError(
             "Cannot sub-delegate from a parent without a non-negative integer maxDepth: the "
