@@ -6,6 +6,7 @@ Layer 1 delegation operations for the Agent Passport System.
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -126,13 +127,25 @@ def verify_delegation(delegation: dict) -> dict:
     # This was hardcoded False, so the verifier (the enforcement point) never checked depth and a
     # hand-crafted delegation with currentDepth > maxDepth verified as valid. sub_delegate guards
     # depth at creation, but the verifier must check it independently.
+    #
+    # A signed record with no maxDepth member has no depth ceiling on verification
+    # (docs/SPEC-v1.1.md section 4.1: "max_depth defaults to unlimited if absent ... v1.1
+    # verifiers enforce depth limits when the field is present"). This used to read an absent
+    # maxDepth as 0, which rejected every such record at currentDepth 1 or more and matched no
+    # sentence in the spec and not the TypeScript verifier. Absence does not show that a record
+    # predates v1.1. The canonical form drops None members, so "maxDepth": None signs to the
+    # same bytes as an absent member, and both get this reading. A present numeric maxDepth
+    # keeps the comparison below, and a present value that is not a number is not compared,
+    # as before.
     current_depth = delegation.get("currentDepth", 0)
-    max_depth = delegation.get("maxDepth", 0)
-    depth_exceeded = (
-        isinstance(current_depth, (int, float)) and not isinstance(current_depth, bool)
-        and isinstance(max_depth, (int, float)) and not isinstance(max_depth, bool)
-        and current_depth > max_depth
-    )
+    depth_exceeded = False
+    if "maxDepth" in delegation:
+        max_depth = delegation["maxDepth"]
+        depth_exceeded = (
+            isinstance(current_depth, (int, float)) and not isinstance(current_depth, bool)
+            and isinstance(max_depth, (int, float)) and not isinstance(max_depth, bool)
+            and current_depth > max_depth
+        )
     if depth_exceeded:
         errors.append(f"Depth exceeded: currentDepth {current_depth} > maxDepth {max_depth}")
 
@@ -179,6 +192,30 @@ def sub_delegate(
         raise ValueError(
             f"Cannot sub-delegate from an invalid parent: {', '.join(parent_status['errors'])}"
         )
+
+    # Accepting a signed record without maxDepth on verification (section 4.1) is not
+    # permission to mint new authority under it. With no ceiling on the parent there is no
+    # value the child could inherit that the parent's issuer signed, so the child is refused.
+    # This used to raise KeyError on an absent maxDepth and TypeError on a non-numeric one.
+    # Integer-valued, matching the TypeScript subDelegate: 2 and 2.0 canonicalize to the same
+    # signed bytes, so both are accepted. Booleans, fractions, negatives, non-finite values and
+    # integers beyond 2**53 - 1 (not exactly representable in the TypeScript SDK) are refused.
+    def _is_depth(v) -> bool:
+        if isinstance(v, bool):
+            return False
+        if isinstance(v, int):
+            return 0 <= v <= 2**53 - 1
+        if isinstance(v, float):
+            return math.isfinite(v) and v.is_integer() and 0 <= v <= 2**53 - 1
+        return False
+
+    if not _is_depth(parent.get("maxDepth")):
+        raise ValueError(
+            "Cannot sub-delegate from a parent without a non-negative integer maxDepth: the "
+            "parent carries no depth ceiling for the child to inherit"
+        )
+    if not _is_depth(parent.get("currentDepth")):
+        raise ValueError("Cannot sub-delegate from a parent without a non-negative integer currentDepth")
 
     if parent["currentDepth"] + 1 > parent["maxDepth"]:
         raise ValueError(
