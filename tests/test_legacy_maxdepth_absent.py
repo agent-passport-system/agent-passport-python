@@ -99,7 +99,8 @@ def test_sub_delegate_refuses_a_parent_without_max_depth():
 
 def test_sub_delegate_refuses_a_non_integer_or_negative_parent_max_depth():
     # sub_delegate verifies the parent first, so -1 at currentDepth 0 is refused there.
-    for value in (None, "2", True, 1.5, -1):
+    # inf and NaN cannot be canonicalized, so no signed parent can carry them.
+    for value in (None, "2", True, False, 1.5, -1, 2**53):
         parent, a = _parent_and_delegate({"maxDepth": value})
         with pytest.raises(ValueError, match="integer maxDepth|invalid parent"):
             sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
@@ -122,3 +123,23 @@ def test_max_depth_null_and_absent_are_one_signed_form():
     a, b = verify_delegation(absent), verify_delegation(with_null)
     assert a["valid"] is True, a["errors"]
     assert (b["valid"], b["depthExceeded"]) == (a["valid"], a["depthExceeded"])
+
+
+def test_sub_delegate_accepts_integer_valued_floats_like_typescript():
+    # 2.0 and 0.0 canonicalize to the same signed bytes as 2 and 0.
+    parent, a = _parent_and_delegate({"maxDepth": 2.0, "currentDepth": 0.0})
+    ints, _ = _parent_and_delegate({"maxDepth": 2, "currentDepth": 0})
+    strip = lambda d: {k: v for k, v in d.items() if k not in ("signature", "delegationId", "delegatedTo", "delegatedBy", "createdAt", "expiresAt")}
+    assert canonicalize(strip(parent)) == canonicalize(strip(ints))
+    assert verify_delegation(parent)["valid"] is True
+    child = sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
+                         scope=["data:read"], private_key=a["privateKey"])
+    assert child["currentDepth"] == 1
+
+
+def test_sub_delegate_refuses_a_non_integer_parent_current_depth():
+    for value in (0.5, True, -1):
+        parent, a = _parent_and_delegate({"currentDepth": value})
+        with pytest.raises(ValueError, match="integer currentDepth|invalid parent"):
+            sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
+                         scope=["data:read"], private_key=a["privateKey"])

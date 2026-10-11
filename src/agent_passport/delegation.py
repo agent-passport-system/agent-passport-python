@@ -6,6 +6,7 @@ Layer 1 delegation operations for the Agent Passport System.
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -196,9 +197,17 @@ def sub_delegate(
     # permission to mint new authority under it. With no ceiling on the parent there is no
     # value the child could inherit that the parent's issuer signed, so the child is refused.
     # This used to raise KeyError on an absent maxDepth and TypeError on a non-numeric one.
-    # A float such as 1.5 is refused too, as in the TypeScript subDelegate.
+    # Integer-valued, matching the TypeScript subDelegate: 2 and 2.0 canonicalize to the same
+    # signed bytes, so both are accepted. Booleans, fractions, negatives, non-finite values and
+    # integers beyond 2**53 - 1 (not exactly representable in the TypeScript SDK) are refused.
     def _is_depth(v) -> bool:
-        return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+        if isinstance(v, bool):
+            return False
+        if isinstance(v, int):
+            return 0 <= v <= 2**53 - 1
+        if isinstance(v, float):
+            return math.isfinite(v) and v.is_integer() and 0 <= v <= 2**53 - 1
+        return False
 
     if not _is_depth(parent.get("maxDepth")):
         raise ValueError(
