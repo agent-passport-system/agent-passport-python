@@ -65,6 +65,13 @@ def create_delegation(
     Returns:
         Signed Delegation dict.
     """
+    # Refuse to sign a depth verify_delegation would report malformed (#223). Without this the
+    # SDK could return a signed record, such as max_depth=-1, that its own verifier refuses.
+    # None is left as it was: it signs to the same bytes as no maxDepth member, which the
+    # verifier accepts with no ceiling.
+    if max_depth is not None and not _is_depth(max_depth):
+        raise ValueError("max_depth must be a non-negative integer no greater than 2**53 - 1")
+
     now = datetime.now(timezone.utc)
     expiry = now + timedelta(days=expires_in_days)
 

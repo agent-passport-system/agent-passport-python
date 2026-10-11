@@ -178,3 +178,22 @@ def test_sub_delegate_refuses_a_non_integer_parent_current_depth():
         with pytest.raises(ValueError, match="integer currentDepth|invalid parent"):
             sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
                          scope=["data:read"], private_key=a["privateKey"])
+
+
+# ── Writer side of #223: create_delegation refuses a depth its own verifier reports malformed ──
+
+def test_create_delegation_refuses_a_malformed_max_depth():
+    h, a = generate_key_pair(), generate_key_pair()
+    for value in (1.5, -1, 2**53, float("nan"), float("inf"), "1", True):
+        with pytest.raises(ValueError, match="max_depth must be a non-negative integer"):
+            create_delegation(delegated_by=h["publicKey"], delegated_to=a["publicKey"],
+                              scope=["data:read"], private_key=h["privateKey"], max_depth=value)
+
+
+def test_create_delegation_signs_the_boundary_values_and_they_verify():
+    h, a = generate_key_pair(), generate_key_pair()
+    # None is unchanged: it signs as no maxDepth member, which verifies with no ceiling.
+    for value in (0, 1, 2.0, 2**53 - 1, None):
+        d = create_delegation(delegated_by=h["publicKey"], delegated_to=a["publicKey"],
+                              scope=["data:read"], private_key=h["privateKey"], max_depth=value)
+        assert verify_delegation(d)["valid"] is True, value
