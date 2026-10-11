@@ -132,8 +132,10 @@ def verify_delegation(delegation: dict) -> dict:
     # verifiers enforce depth limits when the field is present"). This used to read an absent
     # maxDepth as 0, which rejected every such record at currentDepth 1 or more and matched no
     # sentence in the spec and not the TypeScript verifier. Absence does not show that a record
-    # predates v1.1. A present maxDepth keeps the comparison below, and a present value that is
-    # not a number is handled exactly as before.
+    # predates v1.1. The canonical form drops None members, so "maxDepth": None signs to the
+    # same bytes as an absent member, and both get this reading. A present numeric maxDepth
+    # keeps the comparison below, and a present value that is not a number is not compared,
+    # as before.
     current_depth = delegation.get("currentDepth", 0)
     depth_exceeded = False
     if "maxDepth" in delegation:
@@ -194,12 +196,17 @@ def sub_delegate(
     # permission to mint new authority under it. With no ceiling on the parent there is no
     # value the child could inherit that the parent's issuer signed, so the child is refused.
     # This used to raise KeyError on an absent maxDepth and TypeError on a non-numeric one.
-    parent_max = parent.get("maxDepth")
-    if not isinstance(parent_max, (int, float)) or isinstance(parent_max, bool):
+    # A float such as 1.5 is refused too, as in the TypeScript subDelegate.
+    def _is_depth(v) -> bool:
+        return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+    if not _is_depth(parent.get("maxDepth")):
         raise ValueError(
-            "Cannot sub-delegate from a parent without a numeric maxDepth: the parent carries "
-            "no depth ceiling for the child to inherit"
+            "Cannot sub-delegate from a parent without a non-negative integer maxDepth: the "
+            "parent carries no depth ceiling for the child to inherit"
         )
+    if not _is_depth(parent.get("currentDepth")):
+        raise ValueError("Cannot sub-delegate from a parent without a non-negative integer currentDepth")
 
     if parent["currentDepth"] + 1 > parent["maxDepth"]:
         raise ValueError(

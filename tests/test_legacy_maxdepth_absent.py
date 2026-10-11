@@ -92,15 +92,16 @@ def _parent_and_delegate(changes: dict, drop: tuple = ()):
 def test_sub_delegate_refuses_a_parent_without_max_depth():
     parent, a = _parent_and_delegate({}, drop=("maxDepth",))
     assert verify_delegation(parent)["valid"] is True
-    with pytest.raises(ValueError, match="numeric maxDepth"):
+    with pytest.raises(ValueError, match="integer maxDepth"):
         sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
                      scope=["data:read"], private_key=a["privateKey"])
 
 
-def test_sub_delegate_refuses_a_non_numeric_parent_max_depth():
-    for value in (None, "2", True):
+def test_sub_delegate_refuses_a_non_integer_or_negative_parent_max_depth():
+    # sub_delegate verifies the parent first, so -1 at currentDepth 0 is refused there.
+    for value in (None, "2", True, 1.5, -1):
         parent, a = _parent_and_delegate({"maxDepth": value})
-        with pytest.raises(ValueError, match="numeric maxDepth"):
+        with pytest.raises(ValueError, match="integer maxDepth|invalid parent"):
             sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
                          scope=["data:read"], private_key=a["privateKey"])
 
@@ -110,3 +111,14 @@ def test_sub_delegate_with_explicit_max_depth_unchanged():
     child = sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
                          scope=["data:read"], private_key=a["privateKey"])
     assert child["maxDepth"] == 2 and child["currentDepth"] == 1
+
+
+def test_max_depth_null_and_absent_are_one_signed_form():
+    absent = _signed({"currentDepth": 2}, drop=("maxDepth",))
+    with_null = dict(absent)
+    with_null["maxDepth"] = None
+    assert canonicalize({k: v for k, v in with_null.items() if k != "signature"}) == \
+        canonicalize({k: v for k, v in absent.items() if k != "signature"})
+    a, b = verify_delegation(absent), verify_delegation(with_null)
+    assert a["valid"] is True, a["errors"]
+    assert (b["valid"], b["depthExceeded"]) == (a["valid"], a["depthExceeded"])
