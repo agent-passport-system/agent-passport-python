@@ -4,8 +4,8 @@
 docs/SPEC-v1.1.md section 4.1 says an absent max_depth has no ceiling on verification,
 and the TypeScript verifyDelegation applies none. This verifier used to read absence as
 0. The vendored TypeScript case delegation-without-max-depth-at-depth-64 and the locally
-minted record at currentDepth 3 fail before the change. Explicit limits, and present
-values that are not numbers, behave as before.
+minted record at currentDepth 3 fail before the change. Explicit limits behave as before.
+A present maxDepth that is not a non-negative integer is invalid (#223).
 """
 import json
 from pathlib import Path
@@ -62,12 +62,47 @@ def test_explicit_limits_unchanged():
     assert zero["depthExceeded"] is True and zero["valid"] is False
 
 
-def test_present_non_numeric_max_depth_behaves_as_before():
-    # Not part of this change: a present maxDepth that is not a number is not compared, as it
-    # was not before. Pinned so the absence rule does not silently move these cases.
-    for value in (None, "1", True):
-        status = verify_delegation(_signed({"maxDepth": value, "currentDepth": 3}))
-        assert status["depthExceeded"] is False, repr(value)
+def test_present_malformed_max_depth_is_invalid():
+    # #223: a present maxDepth that is not a non-negative integer used to be skipped, so the
+    # record verified at any depth. It is now invalid, at depth 0 as well as above, and no depth
+    # result is claimed for it.
+    for value in ("1", "0", True, False, 1.5, -1, 2**53, [1], {"n": 1}):
+        for depth in (0, 2):
+            status = verify_delegation(_signed({"maxDepth": value, "currentDepth": depth}))
+            assert status["valid"] is False, (repr(value), depth)
+            assert status["depthExceeded"] is False, (repr(value), depth)
+            assert any(e.startswith("Malformed maxDepth") for e in status["errors"]), (repr(value), depth)
+
+
+def test_integer_valued_float_max_depth_is_compared():
+    assert verify_delegation(_signed({"maxDepth": 2.0, "currentDepth": 2}))["valid"] is True
+    over = verify_delegation(_signed({"maxDepth": 1.0, "currentDepth": 2}))
+    assert over["depthExceeded"] is True and over["valid"] is False
+
+
+def test_null_max_depth_is_still_absent():
+    status = verify_delegation(_signed({"maxDepth": None, "currentDepth": 3}))
+    assert status["valid"] is True, status["errors"]
+    assert status["depthExceeded"] is False
+
+
+def test_present_malformed_current_depth_is_invalid():
+    # Same comparison, same split: TypeScript coerced "5" to 5 and this verifier skipped it.
+    for value in ("5", "0", True, 0.5, -1, 2**53, [1]):
+        for max_depth in (1, None):
+            status = verify_delegation(_signed({"maxDepth": max_depth, "currentDepth": value}))
+            label = (repr(value), max_depth)
+            assert status["valid"] is False, label
+            assert status["depthExceeded"] is False, label
+            assert any(e.startswith("Malformed currentDepth") for e in status["errors"]), label
+
+
+def test_absent_or_null_current_depth_is_not_compared():
+    for record in (_signed({"maxDepth": 0}, drop=("currentDepth",)),
+                   _signed({"maxDepth": 0, "currentDepth": None})):
+        status = verify_delegation(record)
+        assert status["valid"] is True, status["errors"]
+        assert status["depthExceeded"] is False
 
 
 # ── Minting a child is a separate question from verifying a record ──
