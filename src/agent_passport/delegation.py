@@ -190,6 +190,17 @@ def sub_delegate(
             f"Cannot sub-delegate from an invalid parent: {', '.join(parent_status['errors'])}"
         )
 
+    # Accepting a signed record without maxDepth on verification (section 4.1) is not
+    # permission to mint new authority under it. With no ceiling on the parent there is no
+    # value the child could inherit that the parent's issuer signed, so the child is refused.
+    # This used to raise KeyError on an absent maxDepth and TypeError on a non-numeric one.
+    parent_max = parent.get("maxDepth")
+    if not isinstance(parent_max, (int, float)) or isinstance(parent_max, bool):
+        raise ValueError(
+            "Cannot sub-delegate from a parent without a numeric maxDepth: the parent carries "
+            "no depth ceiling for the child to inherit"
+        )
+
     if parent["currentDepth"] + 1 > parent["maxDepth"]:
         raise ValueError(
             f"Depth limit exceeded: would be depth {parent['currentDepth'] + 1}, "

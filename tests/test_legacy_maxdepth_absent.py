@@ -68,3 +68,45 @@ def test_present_non_numeric_max_depth_behaves_as_before():
     for value in (None, "1", True):
         status = verify_delegation(_signed({"maxDepth": value, "currentDepth": 3}))
         assert status["depthExceeded"] is False, repr(value)
+
+
+# ── Minting a child is a separate question from verifying a record ──
+
+import pytest  # noqa: E402
+
+from agent_passport import sub_delegate  # noqa: E402
+
+
+def _parent_and_delegate(changes: dict, drop: tuple = ()):
+    h, a = generate_key_pair(), generate_key_pair()
+    d = create_delegation(
+        delegated_by=h["publicKey"], delegated_to=a["publicKey"], scope=["data:read"],
+        private_key=h["privateKey"], spend_limit=10, max_depth=2,
+    )
+    d = {k: v for k, v in d.items() if k != "signature" and k not in drop}
+    d.update(changes)
+    d["signature"] = sign(canonicalize(d), h["privateKey"])
+    return d, a
+
+
+def test_sub_delegate_refuses_a_parent_without_max_depth():
+    parent, a = _parent_and_delegate({}, drop=("maxDepth",))
+    assert verify_delegation(parent)["valid"] is True
+    with pytest.raises(ValueError, match="numeric maxDepth"):
+        sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
+                     scope=["data:read"], private_key=a["privateKey"])
+
+
+def test_sub_delegate_refuses_a_non_numeric_parent_max_depth():
+    for value in (None, "2", True):
+        parent, a = _parent_and_delegate({"maxDepth": value})
+        with pytest.raises(ValueError, match="numeric maxDepth"):
+            sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
+                         scope=["data:read"], private_key=a["privateKey"])
+
+
+def test_sub_delegate_with_explicit_max_depth_unchanged():
+    parent, a = _parent_and_delegate({})
+    child = sub_delegate(parent, delegated_to=generate_key_pair()["publicKey"],
+                         scope=["data:read"], private_key=a["privateKey"])
+    assert child["maxDepth"] == 2 and child["currentDepth"] == 1
