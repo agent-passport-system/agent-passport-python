@@ -1,5 +1,62 @@
 # Changelog
 
+## 4.3.0 (2026-10-14)
+
+Adds the Cycles budget-authority rail, offline path. This is a port of the behaviour of
+`agent-passport-system` 8.0.0 (TypeScript, `src/v2/payment-rails/cycles`). Cycles is an
+external budget authority protocol with a reserve, commit and release lifecycle. APS signs
+receipts that bind by content hash to a signed Cycles evidence envelope. The Python SDK had
+no payment rails before this release.
+
+Nothing existing changes. The new code is in `agent_passport.v2.payment_rails.cycles` and is
+also exported from the package root. A caller that does not import it sees 4.2.1 behaviour.
+
+### In scope
+
+* Types for the permit receipt, the release receipt, the denial, the evidence reference and
+  the evidence envelope input.
+* `map_cycles_denial_to_foundation`, with the 15 ErrorCode and 6 DecisionReasonCode tables
+  ported entry for entry from the TypeScript SDK.
+* `sign_cycles_permit_receipt`, `sign_cycles_release_receipt` and `sign_cycles_denial`.
+* `verify_cycles_permit_receipt`, `verify_cycles_release_receipt` and `verify_cycles_denial`,
+  synchronous, with the options `evidence`, `expected_signer`, `now` and `ttl_seconds`.
+* With a supplied envelope, the checks run in the TypeScript order. The envelope content hash
+  is recomputed (`evidence_id` and `signature` set to the empty string, JCS, sha256) and must
+  equal both the envelope's `evidence_id` and the receipt's `cycles_evidence_id_sha256`
+  (`EVIDENCE_REF_HASH_MISMATCH`). The envelope's own Ed25519 signature is then checked
+  (`EVIDENCE_SIGNATURE_INVALID`). For permit and release, the 8.0.0 correspondence check
+  follows (`EVIDENCE_CORRESPONDENCE_FIELD_MISSING`, `EVIDENCE_CORRESPONDENCE_MISMATCH`). It
+  compares stage and `reservation_id` only. Denials get no correspondence check. A pass
+  reports `evidence_authenticity` as `signature_valid`, or `pinned_issuer` when
+  `expected_signer` is set.
+* A malformed receipt or envelope returns a structured failure and does not raise. This covers
+  input that is not a dict, that has no JSON form (datetime, set, bytes, NaN, non-string keys,
+  unpaired surrogates), that nests deeper than 200 levels or holds more than 200000 values,
+  and that refers to itself.
+* The cross-language vectors: `tests/cross_impl/cycles-correspondence-vectors.json`, vendored
+  byte for byte from `agent-passport-system` commit `ababe0f`, all 13 cases. The test also
+  re-signs each receipt body and each re-signed envelope and compares the signatures byte
+  for byte.
+
+### Out of scope
+
+* The async `*WithDID` variants. A receipt whose `signer` is a DID URI returns
+  `DID_RESOLVER_MISSING`, as the TypeScript sync path does.
+* The `*WithEvidence` fetch and resolver path, and the `correspondence` result it reports.
+* did:cycles and JWKS key resolution, and `verifyCyclesEvidenceSignerAuthority`.
+* A `signer_did` that is not a bare 64 character hex public key fails
+  `EVIDENCE_SIGNATURE_INVALID`.
+
+### Differences from the TypeScript functions
+
+* Options are keyword arguments. `now` is a `datetime`, and a naive one is read as UTC.
+* `issued_at` is parsed with the SDK's strict RFC 3339 parser, not `Date.parse`.
+* The denial verifier captures its inputs as the permit and release verifiers do. The
+  TypeScript denial verifier reads them directly and can throw on input with no JSON form.
+* The DID detail text names the offline verifier. The reason code is the same.
+* `map_cycles_denial_to_foundation` raises `ValueError` for a view it cannot read, where the
+  TypeScript function throws a `TypeError`.
+
 ## 4.2.1 (2026-10-02)
 
 First release from the agent-passport-system organization. No library code changes from 4.2.0.
