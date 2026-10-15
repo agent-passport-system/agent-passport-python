@@ -28,7 +28,7 @@ Remote MCP: https://mcp.aeoess.com/sse
 Docs: https://agent-passport.org/llms-full.txt
 """
 
-__version__ = "4.2.1"
+__version__ = "4.3.0"
 
 # Crypto
 from .crypto import generate_key_pair, sign, verify, public_key_from_private
@@ -1013,4 +1013,29 @@ from .v2.suspension import (
     suspension_cause_from_mapping,
     suspension_record_preimage,
     suspension_release_from_mapping,
+)
+
+# Cycles budget-authority rail, offline path (SDK v4.3.0). Python port of the
+# TypeScript SDK's src/v2/payment-rails/cycles at agent-passport-system 8.0.0:
+# the three receipt kinds (permit, release, denial), the Cycles denial mapping,
+# sign and verify, and the receipt to envelope hash binding, envelope signature
+# and correspondence checks. Synchronous and offline. NOT ported: the async DID
+# variants, the fetch and resolver path, did:cycles and JWKS key resolution, and
+# envelope signer authority.
+from .v2.payment_rails.cycles import (
+    CORRESPONDENCE_NOT_COMPARED,
+    CYCLES_EVIDENCE_SCHEMA_VERSION,
+    CYCLES_PROTOCOL_VERSION,
+    DECISION_REASON_TO_TIER1,
+    ERROR_CODE_TO_TIER1,
+    RAIL_BUDGET_RESERVATION_DENIAL_CLAIM_TYPE,
+    RAIL_BUDGET_RESERVATION_PERMIT_CLAIM_TYPE,
+    RAIL_BUDGET_RESERVATION_RELEASE_CLAIM_TYPE,
+    map_cycles_denial_to_foundation,
+    sign_cycles_denial,
+    sign_cycles_permit_receipt,
+    sign_cycles_release_receipt,
+    verify_cycles_denial,
+    verify_cycles_permit_receipt,
+    verify_cycles_release_receipt,
 )
