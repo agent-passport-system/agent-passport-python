@@ -39,17 +39,23 @@ jobs:
         run: python .github/scripts/release_actor_state.py
 
   test:
-    name: pytest
+    name: pytest (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 3.10 is the floor pyproject declares in requires-python. Testing the
+    # floor is what catches syntax newer than the package claims to support.
+    # The other versions are the ones the classifiers list, so each listed
+    # version has a test run behind it.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # 3.10 is the floor pyproject declares in requires-python. Testing the
-      # floor is what catches syntax newer than the package claims to support.
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install package and test extra
         run: |
